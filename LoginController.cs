@@ -1,0 +1,150 @@
+﻿using System;
+using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Company.Models;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
+
+namespace Company.Controllers
+{
+    [Route("api/[controller]/[action]")]
+    [ApiController]
+    public class LoginController : ControllerBase
+    {
+        private IConfiguration _config;
+        private readonly CompanyContext _context;
+        public LoginController(CompanyContext context, IConfiguration config)
+        {
+            _context = context;
+            _config = config;
+        }
+        [HttpGet]
+        [ActionName("Log")]
+        public IEnumerable<Login> Log()
+        {
+            return _context.Login;
+        }
+        [HttpPost]
+        [ActionName("ins")]
+        public async Task<IActionResult> Postlogins([FromBody] Login login)
+        {
+            _context.Login.Add(login);
+            _context.SaveChanges();
+            return CreatedAtAction("Log", new { id = login.Loginid }, login);
+        }
+
+        [AllowAnonymous]
+        [HttpPost]
+        [ActionName("login")]
+        public IActionResult Login([FromBody]Login login)
+        {
+            Dictionary<string, dynamic> res = new Dictionary<string, dynamic>();
+            res.Add("status", 0);
+            res.Add("message", "Username or Password is incorrect!");
+            
+            IActionResult response = Unauthorized();
+            var user = AuthenticateUser(login);
+            if (user != null)
+            {
+                res["status"] = 1;
+                res["message"] = "Logged in Successfully!";
+                var tokenString = GenerateJSONWebToken(user);
+               // response = Ok(new { token = tokenString,res});
+                res.Add("result", tokenString);
+            }
+            return Ok(res);
+        }
+        private string GenerateJSONWebToken(dynamic user)
+        {
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+
+            var token = new JwtSecurityToken(_config["Jwt:Issuer"],
+              user.ToString(),
+              null,
+              expires: DateTime.Now.AddMinutes(120),
+              signingCredentials: credentials);
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+        private dynamic AuthenticateUser(Login login)
+        {
+            dynamic user = null;
+
+            //Validate the User Credentials  
+            //Demo Purpose, I have Passed HardCoded User Information  
+            Login log = _context.Login.Where(wh => wh.Username == login.Username && wh.Password == login.Password && wh.IsActive == true).FirstOrDefault();
+            try
+            {
+                if (log !=null)
+                {
+                    var id = _context.UserProfile.Where(wh => wh.Loginid == log.Loginid).FirstOrDefault();
+
+                    user = new {Username = log.Username,id};
+                }
+            }
+            catch(Exception ex)
+            {
+              var d=  "Enter accurate credentials!"+ex;
+            }
+            var re = Request;
+            var headers = re.Headers;
+
+            if (headers.ContainsKey("authorization"))
+            {
+                string token = headers["authorization"];
+                token = token.Remove(0,7);
+                //var a = token.ToString().Remove(0, 5);
+            }
+
+            return user;
+
+        }
+
+
+        [HttpPost]
+        [ActionName("checkLog")]
+        public async Task<IActionResult> checkLog([FromBody] Login login)
+        {
+            
+            Dictionary<string, dynamic> response = new Dictionary<string, dynamic>();
+            response.Add("status", 0);
+            response.Add("message", "");
+            response.Add("uid",0);
+
+            if(string.IsNullOrEmpty(login.Username))
+            {
+                response["message"] = "Enter Username!";
+                return (BadRequest(response));
+            }
+            if(string.IsNullOrEmpty(login.Password))
+            {
+                response["message"] = "Enter Your Password!";
+                return (BadRequest(response));
+            }
+            Login log = _context.Login.Where(wh => wh.Username == login.Username && wh.Password == login.Password && wh.IsActive == true).FirstOrDefault();
+            if (log == null)
+            {
+                response["message"] = "Enter accurate credentials!";
+                return Ok(response);
+            }
+            else
+            {
+
+                var d = _context.UserProfile.Where(wh => wh.Loginid == log.Loginid).FirstOrDefault();
+               var id = d.Userid;
+                response["uid"] = d.Userid;
+                response["status"] = 1;
+                response["message"] = "Login Successfull!";
+            }
+            return Ok(response);
+        }
+
+    }
+}
